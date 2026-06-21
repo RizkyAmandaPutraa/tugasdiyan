@@ -1,167 +1,219 @@
-import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
-import axios from 'axios';
-import * as cheerio from 'cheerio';
+import axios from "axios";
+import * as cheerio from "cheerio";
+import { NextResponse } from "next/server";
 
-type ModuleUpdate = { id: string; status: string };
+import {
+  encodeScanEvent,
+  type ScanEvent,
+  type ScanFinding,
+  type ScanModuleUpdate,
+} from "@/lib/scan-stream";
+
+export const maxDuration = 30;
 
 export async function POST(req: Request) {
+  let targetUrl: string;
+
   try {
-    const { targetUrl } = await req.json();
+    const body = (await req.json()) as { targetUrl?: string };
+    targetUrl = body.targetUrl?.trim() ?? "";
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
-    if (!targetUrl) {
-      return NextResponse.json({ error: 'Target URL is required' }, { status: 400 });
-    }
+  if (!targetUrl) {
+    return NextResponse.json({ error: "Target URL is required" }, { status: 400 });
+  }
 
-    // Broadcast channel used by the server to push scan updates to the client.
-    // We send via REST (httpSend) explicitly instead of send() + implicit REST
-    // fallback: server-side API routes don't hold a WebSocket subscription, so
-    // httpSend avoids the "automatically falling back to REST API" deprecation
-    // warning and is the delivery path Supabase recommends here.
-    const channel = supabase.channel('scan_events');
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (event: ScanEvent) => {
+        controller.enqueue(encoder.encode(encodeScanEvent(event)));
+      };
 
-    const emitUpdate = async (progress: number, msg: string, moduleUpdate?: ModuleUpdate) => {
-      await channel.httpSend('scan_update', { progress, msg, moduleUpdate });
-    };
-
-    // Run in background
-    (async () => {
       const moduleStatuses: Record<string, string> = {};
-      const sendComplete = async (payload: {
+      const emitUpdate = (
+        progress: number,
+        message: string,
+        moduleUpdate?: ScanModuleUpdate,
+      ) => {
+        send({ type: "update", progress, message, moduleUpdate });
+      };
+      const updateModule = (
+        id: string,
+        status: string,
+        progress: number,
+        message: string,
+      ) => {
+        moduleStatuses[id] = status;
+        emitUpdate(progress, message, { id, status });
+      };
+      const sendComplete = (payload: {
         message: string;
         score: number;
-        findings: { id: number; moduleId: string; type: string; severity: string }[];
+        findings: ScanFinding[];
         pagesScanned: number;
       }) => {
-        await channel.httpSend('scan_complete', {
+        send({
+          type: "complete",
+          progress: 100,
           ...payload,
-          moduleStatuses
+          moduleStatuses,
         });
-      };
-      const updateModule = async (id: string, status: string, progress: number, msg: string) => {
-         moduleStatuses[id] = status;
-         await emitUpdate(progress, msg, { id, status });
       };
 
       try {
+        updateModule("crawl", "scanning", 5, `Initiating crawl for ${targetUrl}`);
 
-        await updateModule('crawl', 'scanning', 5, `Initiating crawl for ${targetUrl}`);
-        
         let response;
         try {
-          response = await axios.get(targetUrl, { timeout: 10000, validateStatus: () => true });
-          await updateModule('crawl', 'passed', 10, `Crawl successful for ${targetUrl}`);
-        } catch (e: unknown) {
-          const message = e instanceof Error ? e.message : 'Unknown error';
-          await updateModule('crawl', 'failed', 100, `Failed to reach target: ${message}`);
-          await sendComplete({
+          response = await axios.get(targetUrl, {
+            timeout: 10000,
+            validateStatus: () => true,
+          });
+          updateModule("crawl", "passed", 10, `Crawl successful for ${targetUrl}`);
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          updateModule("crawl", "failed", 100, `Failed to reach target: ${message}`);
+          sendComplete({
             message: `Scan failed: ${message}`,
             score: 0,
             findings: [],
-            pagesScanned: 0
+            pagesScanned: 0,
           });
           return;
         }
 
-        await updateModule('https', 'scanning', 15, 'Checking HTTPS validation...');
-        const isHttps = targetUrl.startsWith('https://');
-        await updateModule('https', isHttps ? 'passed' : 'failed', 20, isHttps ? 'HTTPS Validated' : 'HTTPS Missing');
+        updateModule("https", "scanning", 15, "Checking HTTPS validation...");
+        const isHttps = targetUrl.startsWith("https://");
+        updateModule(
+          "https",
+          isHttps ? "passed" : "failed",
+          20,
+          isHttps ? "HTTPS Validated" : "HTTPS Missing",
+        );
 
-        await updateModule('header', 'scanning', 25, 'Checking Security Headers...');
+        updateModule("header", "scanning", 25, "Checking Security Headers...");
         const headers = response.headers;
-        const findings = [];
+        const findings: ScanFinding[] = [];
         let score = 100;
 
-        if (!headers['x-frame-options']) {
-          findings.push({ id: 1, moduleId: 'header', type: 'Missing X-Frame-Options', severity: 'Medium' });
+        if (!headers["x-frame-options"]) {
+          findings.push({
+            id: 1,
+            moduleId: "header",
+            type: "Missing X-Frame-Options",
+            severity: "Medium",
+          });
           score -= 10;
         }
-        if (!headers['content-security-policy']) {
-          findings.push({ id: 2, moduleId: 'header', type: 'Missing Content-Security-Policy', severity: 'High' });
+        if (!headers["content-security-policy"]) {
+          findings.push({
+            id: 2,
+            moduleId: "header",
+            type: "Missing Content-Security-Policy",
+            severity: "High",
+          });
           score -= 20;
         }
-        await updateModule('header', score < 100 ? 'failed' : 'passed', 30, 'Security Headers analyzed');
+        updateModule(
+          "header",
+          score < 100 ? "failed" : "passed",
+          30,
+          "Security Headers analyzed",
+        );
 
-        await updateModule('server', 'scanning', 35, 'Server Information Audit...');
-        await new Promise(r => setTimeout(r, 500));
-        await updateModule('server', 'passed', 40, 'Server Information Audit complete');
+        updateModule("server", "scanning", 35, "Server Information Audit...");
+        await delay(500);
+        updateModule("server", "passed", 40, "Server Information Audit complete");
 
-        await updateModule('cookie', 'scanning', 45, 'Session Cookie Audit...');
-        await new Promise(r => setTimeout(r, 500));
-        await updateModule('cookie', 'passed', 50, 'Session Cookie Audit complete');
+        updateModule("cookie", "scanning", 45, "Session Cookie Audit...");
+        await delay(500);
+        updateModule("cookie", "passed", 50, "Session Cookie Audit complete");
 
-        await updateModule('config', 'scanning', 55, 'Security Configuration Detection...');
-        await new Promise(r => setTimeout(r, 500));
-        await updateModule('config', 'passed', 60, 'Security Configuration checked');
+        updateModule("config", "scanning", 55, "Security Configuration Detection...");
+        await delay(500);
+        updateModule("config", "passed", 60, "Security Configuration checked");
 
-        await updateModule('admin', 'scanning', 65, 'Admin Panel Discovery...');
-        await new Promise(r => setTimeout(r, 500));
-        await updateModule('admin', 'passed', 68, 'Admin Panel Discovery complete');
+        updateModule("admin", "scanning", 65, "Admin Panel Discovery...");
+        await delay(500);
+        updateModule("admin", "passed", 68, "Admin Panel Discovery complete");
 
-        await updateModule('csrf', 'scanning', 70, 'Analyzing DOM for CSRF...');
+        updateModule("csrf", "scanning", 70, "Analyzing DOM for CSRF...");
         const $ = cheerio.load(response.data);
-        const forms = $('form');
-        
+        const forms = $("form");
+
         if (forms.length > 0) {
           let hasCsrfToken = false;
-          $('input').each((i, el) => {
-            const name = $(el).attr('name')?.toLowerCase() || '';
-            if (name.includes('csrf') || name.includes('token')) {
+          $("input").each((_index, element) => {
+            const name = $(element).attr("name")?.toLowerCase() || "";
+            if (name.includes("csrf") || name.includes("token")) {
               hasCsrfToken = true;
             }
           });
-          
+
           if (!hasCsrfToken) {
-            findings.push({ id: 3, moduleId: 'csrf', type: 'Potential CSRF (No token found)', severity: 'High' });
+            findings.push({
+              id: 3,
+              moduleId: "csrf",
+              type: "Potential CSRF (No token found)",
+              severity: "High",
+            });
             score -= 15;
-            await updateModule('csrf', 'failed', 75, 'Potential CSRF detected');
+            updateModule("csrf", "failed", 75, "Potential CSRF detected");
           } else {
-            await updateModule('csrf', 'passed', 75, 'CSRF tokens found');
+            updateModule("csrf", "passed", 75, "CSRF tokens found");
           }
         } else {
-          await updateModule('csrf', 'passed', 75, 'No forms detected');
+          updateModule("csrf", "passed", 75, "No forms detected");
         }
 
-        await updateModule('sql', 'scanning', 80, 'SQL Injection Scanner running...');
-        await new Promise(r => setTimeout(r, 800));
-        await updateModule('sql', 'passed', 83, 'SQL Injection check complete');
+        updateModule("sql", "scanning", 80, "SQL Injection Scanner running...");
+        await delay(800);
+        updateModule("sql", "passed", 83, "SQL Injection check complete");
 
-        await updateModule('xss', 'scanning', 85, 'XSS Scanner running...');
-        await new Promise(r => setTimeout(r, 800));
-        await updateModule('xss', 'passed', 88, 'XSS check complete');
+        updateModule("xss", "scanning", 85, "XSS Scanner running...");
+        await delay(800);
+        updateModule("xss", "passed", 88, "XSS check complete");
 
-        await updateModule('jwt', 'scanning', 90, 'JWT Security Test...');
-        await new Promise(r => setTimeout(r, 500));
-        await updateModule('jwt', 'passed', 92, 'JWT Test complete');
+        updateModule("jwt", "scanning", 90, "JWT Security Test...");
+        await delay(500);
+        updateModule("jwt", "passed", 92, "JWT Test complete");
 
-        await updateModule('api', 'scanning', 96, 'API Security Scanner...');
-        await new Promise(r => setTimeout(r, 500));
-        await updateModule('api', 'passed', 99, 'API Security complete');
+        updateModule("api", "scanning", 96, "API Security Scanner...");
+        await delay(500);
+        updateModule("api", "passed", 99, "API Security complete");
 
-        score = Math.max(0, score);
-
-        await sendComplete({
-          message: 'Scan finished successfully',
-          score,
+        sendComplete({
+          message: "Scan finished successfully",
+          score: Math.max(0, score),
           findings,
-          pagesScanned: 1
+          pagesScanned: 1,
         });
-
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        await emitUpdate(100, `Error during scan: ${message}`);
-        await sendComplete({
+        const message = error instanceof Error ? error.message : "Unknown error";
+        sendComplete({
           message: `Scan failed: ${message}`,
           score: 0,
           findings: [],
-          pagesScanned: 0
+          pagesScanned: 0,
         });
+      } finally {
+        controller.close();
       }
-    })();
+    },
+  });
 
-    return NextResponse.json({ success: true, message: 'Scan initiated' });
+  return new Response(stream, {
+    headers: {
+      "Cache-Control": "no-cache, no-transform",
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
 
-  } catch {
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
-  }
+function delay(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

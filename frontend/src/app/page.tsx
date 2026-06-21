@@ -3,9 +3,9 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Shield, Search, Activity, AlertTriangle, CheckCircle, Zap, Database, Code, Key, ShieldAlert, Network, Cookie, FileText, Lock, Server, Settings, Users, X } from "lucide-react";
-import { supabase } from "@/lib/supabase";
 import Navbar from "@/components/Navbar";
 import { saveScan } from "@/lib/history";
+import { parseScanEventBuffer, type ScanEvent } from "@/lib/scan-stream";
 
 const SCAN_MODULES = [
   { id: 'sql', name: 'SQL Injection Scanner', icon: Database },
@@ -49,56 +49,7 @@ export default function Home() {
   const [moduleStatus, setModuleStatus] = useState<Record<string, 'pending' | 'scanning' | 'passed' | 'failed'>>({});
   const [findings, setFindings] = useState<{id: number, moduleId: string, type: string, severity: string}[]>([]);
   const [selectedModule, setSelectedModule] = useState<string | null>(null);
-  const [scannedUrl, setScannedUrl] = useState("");
-  
   const logEndRef = useRef<HTMLDivElement>(null);
-  const scannedUrlRef = useRef("");
-
-  useEffect(() => {
-    // Listen to Supabase Realtime broadcast for scan updates
-    const channel = supabase.channel('scan_events')
-      .on('broadcast', { event: 'scan_update' }, (payload) => {
-        setScanProgress(payload.payload.progress);
-        setLogs((prev) => [...prev, { msg: `> ${payload.payload.msg}` }]);
-        if (payload.payload.moduleUpdate) {
-           setModuleStatus(prev => ({
-             ...prev, 
-             [payload.payload.moduleUpdate.id]: payload.payload.moduleUpdate.status
-           }));
-        }
-      })
-      .on('broadcast', { event: 'scan_complete' }, (payload) => {
-        setIsScanning(false);
-        setScanProgress(100);
-        setLogs((prev) => [...prev, { msg: `> ${payload.payload.message}` }]);
-        setScanStats({
-          score: payload.payload.score,
-          vulnerabilities: payload.payload.findings?.length || 0,
-          pagesScanned: payload.payload.pagesScanned || 0
-        });
-        setFindings(payload.payload.findings || []);
-        if (payload.payload.moduleStatuses) {
-           setModuleStatus(prev => ({
-             ...prev,
-             ...payload.payload.moduleStatuses
-           }));
-        }
-        // Persist scan result to local history
-        saveScan({
-          url: scannedUrlRef.current,
-          score: payload.payload.score,
-          vulnerabilities: payload.payload.findings?.length || 0,
-          pagesScanned: payload.payload.pagesScanned || 0,
-          findings: payload.payload.findings || [],
-          moduleStatuses: payload.payload.moduleStatuses || {},
-        });
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
 
   useEffect(() => {
     if (logEndRef.current) {
@@ -110,8 +61,6 @@ export default function Home() {
     e.preventDefault();
     if (!targetUrl) return;
     
-    setScannedUrl(targetUrl);
-    scannedUrlRef.current = targetUrl;
     setIsScanning(true);
     setScanProgress(0);
     setLogs([{ msg: `> Initiating scan for ${targetUrl}` }]);
@@ -133,10 +82,71 @@ export default function Home() {
       if (!response.ok) {
         setLogs((prev) => [...prev, { msg: '> Error initiating scan', isError: true }]);
         setIsScanning(false);
+        return;
       }
-    } catch {
-      setLogs((prev) => [...prev, { msg: '> Network error starting scan', isError: true }]);
+
+      if (!response.body) {
+        throw new Error("Scan response did not include a stream");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completed = false;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const parsed = parseScanEventBuffer(buffer);
+        buffer = parsed.remainder;
+
+        for (const event of parsed.events) {
+          if (event.type === "complete") completed = true;
+          applyScanEvent(event, targetUrl);
+        }
+
+        if (done) break;
+      }
+
+      if (!completed) {
+        throw new Error("Scan stream ended before completion");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setLogs((prev) => [...prev, { msg: `> Scan failed: ${message}`, isError: true }]);
       setIsScanning(false);
+    }
+  };
+
+  const applyScanEvent = (event: ScanEvent, url: string) => {
+    setScanProgress(event.progress);
+    setLogs((prev) => [...prev, { msg: `> ${event.message}` }]);
+
+    if (event.type === "update" && event.moduleUpdate) {
+      setModuleStatus((prev) => ({
+        ...prev,
+        [event.moduleUpdate!.id]: event.moduleUpdate!.status as "pending" | "scanning" | "passed" | "failed",
+      }));
+      return;
+    }
+
+    if (event.type === "complete") {
+      setIsScanning(false);
+      setScanStats({
+        score: event.score,
+        vulnerabilities: event.findings.length,
+        pagesScanned: event.pagesScanned,
+      });
+      setFindings(event.findings);
+      setModuleStatus((prev) => ({ ...prev, ...event.moduleStatuses } as typeof prev));
+      void saveScan({
+        url,
+        score: event.score,
+        vulnerabilities: event.findings.length,
+        pagesScanned: event.pagesScanned,
+        findings: event.findings,
+        moduleStatuses: event.moduleStatuses,
+      });
     }
   };
 
