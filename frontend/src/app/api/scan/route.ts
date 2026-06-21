@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
@@ -12,10 +12,6 @@ export async function POST(req: Request) {
     if (!targetUrl) {
       return NextResponse.json({ error: 'Target URL is required' }, { status: 400 });
     }
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-    const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Broadcast channel used by the server to push scan updates to the client.
     // We send via REST (httpSend) explicitly instead of send() + implicit REST

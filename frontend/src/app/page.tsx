@@ -3,15 +3,9 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Shield, Search, Activity, AlertTriangle, CheckCircle, Zap, Database, Code, Key, ShieldAlert, Network, Cookie, FileText, Lock, Server, Settings, Users, X } from "lucide-react";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 import Navbar from "@/components/Navbar";
 import { saveScan } from "@/lib/history";
-
-// Initialize Supabase client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
-);
 
 const SCAN_MODULES = [
   { id: 'sql', name: 'SQL Injection Scanner', icon: Database },
