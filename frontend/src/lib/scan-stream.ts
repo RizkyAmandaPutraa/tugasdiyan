@@ -37,9 +37,17 @@ export function parseScanEventBuffer(buffer: string): {
 } {
   const records = buffer.split("\n");
   const remainder = records.pop() ?? "";
-  const events = records
-    .filter((record) => record.trim().length > 0)
-    .map((record) => JSON.parse(record) as ScanEvent);
+  const events: ScanEvent[] = [];
+
+  for (const record of records) {
+    if (record.trim().length === 0) continue;
+    try {
+      events.push(JSON.parse(record) as ScanEvent);
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : "Unknown parse error";
+      console.error(`[scan-stream] Failed to parse NDJSON record: ${detail}`, record);
+    }
+  }
 
   return { events, remainder };
 }

@@ -1,10 +1,18 @@
 import { ScanHistory } from './types';
 import { SCAN_MODULES, getSuccessExplanation } from './constants';
 
-export const exportScanToPDF = async (scan: ScanHistory) => {
-  if (scan.score === 0) return;
-  
-  const { jsPDF } = await import('jspdf');
+export const exportScanToPDF = async (scan: ScanHistory): Promise<void> => {
+  if (scan.score === 0) {
+    throw new Error('Cannot export a scan with score 0 (scan may have failed)');
+  }
+
+  let jsPDF: typeof import('jspdf')['jsPDF'];
+  try {
+    ({ jsPDF } = await import('jspdf'));
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? err.message : 'Unknown error';
+    throw new Error(`Failed to load PDF library: ${detail}`);
+  }
   const doc = new jsPDF();
   const now = new Date(scan.scannedAt).toLocaleString('id-ID');
   const pageWidth = doc.internal.pageSize.getWidth();
