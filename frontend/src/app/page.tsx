@@ -80,7 +80,12 @@ export default function Home() {
         body: JSON.stringify({ targetUrl })
       });
       if (!response.ok) {
-        setLogs((prev) => [...prev, { msg: '> Error initiating scan', isError: true }]);
+        let detail = `HTTP ${response.status}`;
+        try {
+          const errBody = await response.json() as { error?: string };
+          if (errBody.error) detail = errBody.error;
+        } catch { /* response body not JSON */ }
+        setLogs((prev) => [...prev, { msg: `> Error initiating scan: ${detail}`, isError: true }]);
         setIsScanning(false);
         return;
       }
@@ -139,13 +144,16 @@ export default function Home() {
       });
       setFindings(event.findings);
       setModuleStatus((prev) => ({ ...prev, ...event.moduleStatuses } as typeof prev));
-      void saveScan({
+      saveScan({
         url,
         score: event.score,
         vulnerabilities: event.findings.length,
         pagesScanned: event.pagesScanned,
         findings: event.findings,
         moduleStatuses: event.moduleStatuses,
+      }).catch((err: unknown) => {
+        const detail = err instanceof Error ? err.message : "Unknown error";
+        setLogs((prev) => [...prev, { msg: `> Warning: failed to save scan result — ${detail}`, isWarning: true }]);
       });
     }
   };

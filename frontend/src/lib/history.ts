@@ -2,24 +2,18 @@ import { ScanHistory } from "./types";
 import { supabase } from "./supabase";
 
 export async function getHistory(): Promise<ScanHistory[]> {
-  try {
-    const { data, error } = await supabase
-      .from("scan_history")
-      .select("*")
-      .order("scannedAt", { ascending: false });
+  const { data, error } = await supabase
+    .from("scan_history")
+    .select("*")
+    .order("scannedAt", { ascending: false });
 
-    if (error) {
-      console.warn("Error fetching history from Supabase:", JSON.stringify(error));
-      return [];
-    }
-    return (data || []) as ScanHistory[];
-  } catch (err) {
-    console.error("Failed to get history:", err);
-    return [];
+  if (error) {
+    throw new Error(`Failed to fetch scan history: ${error.message}`);
   }
+  return (data || []) as ScanHistory[];
 }
 
-export async function saveScan(entry: Omit<ScanHistory, "id" | "scannedAt">): Promise<ScanHistory | null> {
+export async function saveScan(entry: Omit<ScanHistory, "id" | "scannedAt">): Promise<ScanHistory> {
   const newScan = {
     url: entry.url,
     score: entry.score,
@@ -29,54 +23,37 @@ export async function saveScan(entry: Omit<ScanHistory, "id" | "scannedAt">): Pr
     moduleStatuses: entry.moduleStatuses,
   };
 
-  try {
-    const { data, error } = await supabase
-      .from("scan_history")
-      .insert([newScan])
-      .select()
-      .single();
+  const { data, error } = await supabase
+    .from("scan_history")
+    .insert([newScan])
+    .select()
+    .single();
 
-    if (error) {
-      console.warn("Error saving scan to Supabase:", JSON.stringify(error));
-      return null;
-    }
-    
-    // We also implement limit keeping via a rpc or edge function if needed, 
-    // but for now Supabase DB can hold more than 50 easily.
-    return data as ScanHistory;
-  } catch (err) {
-    console.warn("Failed to save scan:", err);
-    return null;
+  if (error) {
+    throw new Error(`Failed to save scan result: ${error.message}`);
   }
+
+  return data as ScanHistory;
 }
 
 export async function deleteScan(id: string): Promise<void> {
-  try {
-    const { error } = await supabase
-      .from("scan_history")
-      .delete()
-      .eq("id", id);
-      
-    if (error) {
-      console.warn("Error deleting scan from Supabase:", JSON.stringify(error));
-    }
-  } catch (err) {
-    console.warn("Failed to delete scan:", err);
+  const { error } = await supabase
+    .from("scan_history")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    throw new Error(`Failed to delete scan record: ${error.message}`);
   }
 }
 
 export async function clearHistory(): Promise<void> {
-  try {
-    // Delete all records. Note: RLS policies might require specific setup to allow bulk delete.
-    const { error } = await supabase
-      .from("scan_history")
-      .delete()
-      .neq("id", "00000000-0000-0000-0000-000000000000"); // A dummy condition that is always true
-      
-    if (error) {
-      console.warn("Error clearing history from Supabase:", JSON.stringify(error));
-    }
-  } catch (err) {
-    console.warn("Failed to clear history:", err);
+  const { error } = await supabase
+    .from("scan_history")
+    .delete()
+    .neq("id", "00000000-0000-0000-0000-000000000000");
+
+  if (error) {
+    throw new Error(`Failed to clear scan history: ${error.message}`);
   }
 }

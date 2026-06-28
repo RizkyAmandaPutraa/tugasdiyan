@@ -73,11 +73,22 @@ function FindingBadge({ finding }: { finding: ScanFinding }) {
 function ScanCard({
   entry,
   onDelete,
+  onError,
 }: {
   entry: ScanHistory;
   onDelete: (id: string) => void;
+  onError: (message: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+
+  const handleExportPDF = async () => {
+    try {
+      await exportScanToPDF(entry);
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : "Unknown error";
+      onError(`Gagal mengekspor PDF: ${detail}`);
+    }
+  };
 
   return (
     <motion.div
@@ -132,7 +143,7 @@ function ScanCard({
         </button>
         <div className="ml-auto flex items-center gap-3">
           <button
-            onClick={() => exportScanToPDF(entry)}
+            onClick={handleExportPDF}
             className="flex items-center gap-1 text-xs text-neutral-400 hover:text-cyan-400 transition-colors"
           >
             <Download className="w-3.5 h-3.5" />
@@ -240,12 +251,20 @@ function ScanCard({
 export default function RiwayatPage() {
   const [history, setHistory] = useState<ScanHistory[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchHistory = async () => {
     setLoaded(false);
-    const data = await getHistory();
-    setHistory(data);
-    setLoaded(true);
+    setError(null);
+    try {
+      const data = await getHistory();
+      setHistory(data);
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : "Unknown error";
+      setError(`Gagal memuat riwayat: ${detail}`);
+    } finally {
+      setLoaded(true);
+    }
   };
 
   useEffect(() => {
@@ -253,13 +272,24 @@ export default function RiwayatPage() {
   }, []);
 
   const handleDelete = async (id: string) => {
-    await deleteScan(id);
-    await fetchHistory();
+    try {
+      await deleteScan(id);
+      await fetchHistory();
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : "Unknown error";
+      setError(`Gagal menghapus data: ${detail}`);
+    }
   };
 
   const handleClearAll = async () => {
-    await clearHistory();
-    setHistory([]);
+    try {
+      await clearHistory();
+      setHistory([]);
+      setError(null);
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : "Unknown error";
+      setError(`Gagal menghapus semua riwayat: ${detail}`);
+    }
   };
 
   return (
@@ -295,6 +325,20 @@ export default function RiwayatPage() {
           )}
         </div>
 
+        {/* Error Banner */}
+        {error && (
+          <div className="mb-6 flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm">
+            <AlertTriangle className="w-5 h-5 shrink-0" />
+            <span className="flex-1">{error}</span>
+            <button
+              onClick={() => setError(null)}
+              className="text-red-400 hover:text-red-300 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Content */}
         {!loaded && (
           <div className="flex items-center gap-2 text-neutral-500 text-sm">
@@ -319,7 +363,7 @@ export default function RiwayatPage() {
           <div className="space-y-4">
             <AnimatePresence mode="popLayout">
               {history.map((entry) => (
-                <ScanCard key={entry.id} entry={entry} onDelete={handleDelete} />
+                <ScanCard key={entry.id} entry={entry} onDelete={handleDelete} onError={setError} />
               ))}
             </AnimatePresence>
             <p className="text-center text-xs text-neutral-600 pt-4">
