@@ -8,10 +8,39 @@ import {
   type ScanFinding,
   type ScanModuleUpdate,
 } from "@/lib/scan-stream";
+import { validateTargetUrl } from "@/lib/url-validation";
 
 export const maxDuration = 30;
 
+// Simple in-memory rate limiter (per-IP, 5 requests per minute)
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_REQUESTS = 5;
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+
+  if (!entry || now > entry.resetTime) {
+    rateLimitMap.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    return false;
+  }
+
+  entry.count += 1;
+  return entry.count > RATE_LIMIT_MAX_REQUESTS;
+}
+
 export async function POST(req: Request) {
+  // Rate limiting
+  const forwarded = req.headers.get("x-forwarded-for");
+  const ip = forwarded?.split(",")[0]?.trim() || "unknown";
+  if (isRateLimited(ip)) {
+    return NextResponse.json(
+      { error: "Too many requests. Please try again later." },
+      { status: 429 },
+    );
+  }
+
   let targetUrl: string;
 
   try {
@@ -24,6 +53,13 @@ export async function POST(req: Request) {
   if (!targetUrl) {
     return NextResponse.json({ error: "Target URL is required" }, { status: 400 });
   }
+
+  // Validate URL to prevent SSRF
+  const validation = validateTargetUrl(targetUrl);
+  if (!validation.valid) {
+    return NextResponse.json({ error: validation.error }, { status: 400 });
+  }
+  targetUrl = validation.url;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
