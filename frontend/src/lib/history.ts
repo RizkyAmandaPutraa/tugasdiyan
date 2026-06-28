@@ -1,5 +1,5 @@
-import { ScanHistory } from "./types";
-import { supabase } from "./supabase";
+import type { ScanHistory } from "./types.ts";
+import { supabase } from "./supabase.ts";
 
 export async function getHistory(): Promise<ScanHistory[]> {
   try {

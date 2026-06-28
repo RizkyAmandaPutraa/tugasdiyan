@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/lib/scan-stream.test.ts"
+    "test": "NEXT_PUBLIC_SUPABASE_URL=http://localhost:0 NEXT_PUBLIC_SUPABASE_ANON_KEY=test-key node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/lib/scan-stream.test.ts src/lib/constants.test.ts src/lib/history.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
