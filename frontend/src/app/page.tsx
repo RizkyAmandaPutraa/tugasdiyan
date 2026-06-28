@@ -2,43 +2,11 @@
 
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Shield, Search, Activity, AlertTriangle, CheckCircle, Zap, Database, Code, Key, ShieldAlert, Network, Cookie, FileText, Lock, Server, Settings, Users, X } from "lucide-react";
+import { Shield, Search, Activity, AlertTriangle, CheckCircle, Zap, X } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { saveScan } from "@/lib/history";
 import { parseScanEventBuffer, type ScanEvent } from "@/lib/scan-stream";
-
-const SCAN_MODULES = [
-  { id: 'sql', name: 'SQL Injection Scanner', icon: Database },
-  { id: 'xss', name: 'XSS Scanner', icon: Code },
-  { id: 'jwt', name: 'JWT Security Test', icon: Key },
-  { id: 'csrf', name: 'CSRF Audit', icon: ShieldAlert },
-  { id: 'api', name: 'API Security Scanner', icon: Network },
-  { id: 'cookie', name: 'Session Cookie Audit', icon: Cookie },
-  { id: 'header', name: 'Security Header Check', icon: FileText },
-  { id: 'https', name: 'HTTPS Validation', icon: Lock },
-  { id: 'server', name: 'Server Information Audit', icon: Server },
-  { id: 'crawl', name: 'Internal Page Crawling', icon: Search },
-  { id: 'config', name: 'Security Configuration Detection', icon: Settings },
-  { id: 'admin', name: 'Admin Panel Discovery', icon: Users }
-];
-
-const getSuccessExplanation = (id: string) => {
-  switch (id) {
-    case 'sql': return "Tidak ditemukan pola input yang mengizinkan injeksi kode SQL. Parameter pada URL dan formulir tampaknya telah di-filter atau menggunakan parameterized queries dengan baik.";
-    case 'xss': return "Tidak ada potensi eksekusi script lintas situs (XSS). Seluruh input dari pengguna telah dibersihkan (sanitized) dan di-escape sebelum ditampilkan kembali di halaman web.";
-    case 'jwt': return "Implementasi JWT aman. Tidak ada kerentanan terhadap serangan penggantian algoritma 'none' dan mekanisme signature tervalidasi dengan baik.";
-    case 'csrf': return "Token Anti-CSRF yang unik telah ditemukan di formulir web. Situs ini terlindungi dari aksi manipulasi paksa lintas situs (Cross-Site Request Forgery).";
-    case 'api': return "Endpoint API terlindungi dengan baik. Tidak mengekspos data sensitif secara publik dan sistem kontrol akses beroperasi dengan konfigurasi CORS yang aman.";
-    case 'cookie': return "Cookie otentikasi / sesi telah diatur dengan atribut 'HttpOnly' dan 'Secure', mengamankannya dari pencurian via script (XSS) dan pemantauan jaringan (Sniffing).";
-    case 'header': return "Header keamanan HTTP kritis (seperti Content-Security-Policy dan X-Frame-Options) terkonfigurasi dengan tepat untuk menangkal serangan Clickjacking dan Code Injection.";
-    case 'https': return "Website beroperasi penuh di atas SSL/TLS (HTTPS), memastikan integritas dan enkripsi data (End-to-End Encryption) antara perangkat pengguna dan server.";
-    case 'server': return "Sistem tidak membocorkan versi web server (seperti versi spesifik Nginx/Apache) atau informasi teknologi backend yang dapat mempermudah pengintaian (Profiling) oleh peretas.";
-    case 'crawl': return "Proses crawler otomatis tidak menemukan direktori sensitif, file konfigurasi tersembunyi (.env), atau dokumen cadangan (.bak) yang terekspos ke internet.";
-    case 'config': return "Deteksi konfigurasi keamanan mendapati infrastruktur server beroperasi sesuai dengan praktik standar keamanan terbaik (Security Best Practices).";
-    case 'admin': return "Panel administrasi tidak ditemukan pada path yang umum atau mudah ditebak (misalnya /admin, /administrator, /login). Hal ini menekan risiko serangan brute-force.";
-    default: return "Sistem memvalidasi modul ini dengan sukses. Tidak ada anomali atau celah keamanan yang terdeteksi.";
-  }
-};
+import { SCAN_MODULES, getSuccessExplanation } from "@/lib/constants";
 
 export default function Home() {
   const [targetUrl, setTargetUrl] = useState("");
