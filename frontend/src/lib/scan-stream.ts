@@ -1,9 +1,6 @@
-export type ScanFinding = {
-  id: number;
-  moduleId: string;
-  type: string;
-  severity: string;
-};
+import type { ScanFinding } from "./types";
+
+export type { ScanFinding };
 
 export type ScanModuleUpdate = {
   id: string;
